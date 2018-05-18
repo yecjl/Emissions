@@ -1,22 +1,30 @@
 package com.study.emissions;
 
+import android.app.Activity;
 import android.content.Context;
+import android.graphics.Color;
 import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.widget.TextView;
 
-public class MainActivity extends AppCompatActivity {
+import com.github.mikephil.charting.charts.LineChart;
+import com.github.mikephil.charting.data.Entry;
+import com.github.mikephil.charting.highlight.Highlight;
+import com.github.mikephil.charting.listener.OnChartValueSelectedListener;
+
+import java.util.ArrayList;
+
+public class MainActivity extends Activity implements OnChartValueSelectedListener, AcceleratedSensorListener.LinearAccelerationListener {
 
     private SensorManager mSensorManager; // 传感控制
-    private TestSensorListener mSensorListener; // 监听器
+    private AcceleratedSensorListener mSensorListener; // 监听器
     private TextView mSensorTip, mSensorInfo;
     private String TAG = MainActivity.class.getName();
-    private long lastTimeStamp = 0;
+    private LineChart mChart;
+    private ChartUtil mChartUtil;
+    private ArrayList<Entry>[] mEntries = new ArrayList[]{new ArrayList(), new ArrayList(), new ArrayList()};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -25,13 +33,19 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
 
-        mSensorListener = new TestSensorListener();
+        mSensorListener = new AcceleratedSensorListener(this);
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
     }
 
     private void initViews() {
-        mSensorTip = (TextView) findViewById(R.id.tv_sensor_tip);
-        mSensorInfo = (TextView) findViewById(R.id.tv_sensor_info);
+        mSensorTip = findViewById(R.id.tv_sensor_tip);
+        mSensorInfo = findViewById(R.id.tv_sensor_info);
+        mChart = findViewById(R.id.lineChart);
+        mChartUtil = new ChartUtil(this, mChart);
+        mChartUtil.initChart(); // 初始化图标
+        mChartUtil.initLine("X方向的加速度", Integer.valueOf(Color.rgb(140, 234, 255))); // 初始化线
+        mChartUtil.initLine("Y方向的加速度", Color.RED); // 初始化线
+        mChartUtil.initLine("Z方向的加速度", Color.YELLOW); // 初始化线
     }
 
     @Override
@@ -49,84 +63,27 @@ public class MainActivity extends AppCompatActivity {
         mSensorManager.unregisterListener(mSensorListener);
     }
 
-    private class TestSensorListener implements SensorEventListener {
-        final float mAlpha = 0.8f;
-        private float[] mGravity = new float[3];
-        private float[] mLinearAcceleration = new float[3];
 
-        @Override
-        public void onSensorChanged(SensorEvent event) {
-            // 读取加速度传感器数值，values数组0,1,2分别对应x,y,z轴的加速度
-            if (event.sensor == null) {
-                return;
-            }
+    @Override
+    public void onValueSelected(Entry entry, Highlight highlight) {
+        Log.i(TAG, "Value: " + entry.getY() + ", xIndex: " + entry.getX()
+                + ", DataSet index: " + highlight.getDataSetIndex());
+    }
 
-            switch (event.sensor.getType()) {
-                case Sensor.TYPE_ACCELEROMETER:
-                    long stamp = System.currentTimeMillis() / 1000l;// 1393844912
+    @Override
+    public void onNothingSelected() {
 
-                    mGravity[0] = mAlpha * mGravity[0] + (1 - mAlpha) * event.values[0];
-                    mGravity[1] = mAlpha * mGravity[1] + (1 - mAlpha) * event.values[1];
-                    mGravity[2] = mAlpha * mGravity[2] + (1 - mAlpha) * event.values[2];
+    }
 
-                    float[] temp = new float[3];
-
-                    temp[0] = event.values[0] - mGravity[0];
-                    temp[1] = event.values[1] - mGravity[1];
-                    temp[2] = event.values[2] - mGravity[2];
-
-
-                    int px = (int) Math.abs(mLinearAcceleration[0] - temp[0]);
-                    int py = (int) Math.abs(mLinearAcceleration[1] - temp[1]);
-                    int pz = (int) Math.abs(mLinearAcceleration[2] - temp[2]);
-
-                    if ((stamp - lastTimeStamp) > 1) {
-                        if (getMaxValue(px, py, pz) > 2) {
-                            lastTimeStamp = stamp;
-                            mSensorInfo.setText(temp[0] + "\n" + temp[1] + "\n" + temp[2]);
-                            mSensorTip.setText("检测手机在移动..");
-                        } else {
-                            mSensorTip.setText("检测手机没有移动..");
-                        }
-                    }
-
-                    mLinearAcceleration[0] = temp[0];
-                    mLinearAcceleration[1] = temp[1];
-                    mLinearAcceleration[2] = temp[2];
-                    break;
-
-                case Sensor.TYPE_GRAVITY:
-                    mGravity[0] = event.values[0];
-                    mGravity[1] = event.values[1];
-                    mGravity[2] = event.values[2];
-                    break;
-            }
-        }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {
-            Log.i(TAG, "onAccuracyChanged");
+    @Override
+    public void onChangeData(float[] linearAcceleration) {
+        for (int i = 0; i < linearAcceleration.length; i++) {
+            mChartUtil.setData(mEntries[i], linearAcceleration[i], i);
         }
     }
 
-    /**
-     * 获取一个最大值
-     *
-     * @param px
-     * @param py
-     * @param pz
-     * @return
-     */
-    public int getMaxValue(int px, int py, int pz) {
-        int max = 0;
-        if (px > py && px > pz) {
-            max = px;
-        } else if (py > px && py > pz) {
-            max = py;
-        } else if (pz > px && pz > py) {
-            max = pz;
-        }
-
-        return max;
+    @Override
+    public void onMoved(boolean isMove) {
+        mSensorTip.setText(isMove ? "检测手机正在移动" : "检测手机没有移动");
     }
 }
